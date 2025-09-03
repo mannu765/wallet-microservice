@@ -179,9 +179,9 @@ func (s *walletService) processTransaction(
         Reference:   req.Reference,
     }
 
-    if err := s.walletRepo.ProcessTransactionWithRollback(walletID, req.Amount, t, txModel); err != nil {
-        return nil, err
-    }
+    // if err := s.walletRepo.ProcessTransactionWithRollback(walletID, req.Amount, t, txModel); err != nil {
+    //     return nil, err
+    // }
 
     return &models.TransactionResponse{
         ID:          txModel.ID,

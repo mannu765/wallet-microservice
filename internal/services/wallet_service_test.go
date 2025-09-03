@@ -80,6 +80,11 @@ func (m *MockWalletRepository) GetTransactionsByWalletID(walletID uuid.UUID, lim
 	return nil, args.Error(1)
 }
 
+func (m *MockWalletRepository) ProcessTransactionWithRollback(walletID uuid.UUID, amount float64, t models.TransactionType, txModel *models.Transaction) error {
+	args := m.Called(walletID, amount, t, txModel)
+	return args.Error(0)
+}
+
 func TestCreateWallet(t *testing.T) {
 	t.Run("creates with default USD when empty currency", func(t *testing.T) {
 		repo := new(MockWalletRepository)

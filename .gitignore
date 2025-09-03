@@ -1,0 +1,73 @@
+# --- Go build artifacts ---
+/bin/
+/build/
+/dist/
+/out/
+/tmp/
+/coverage/
+/profiles/
+*.test
+*.cover
+*.cov
+*.out
+
+# Go module / cache (module cache is outside repo, but keep tidy noise out)
+go.work
+go.work.sum
+
+# Vendor: usually not committed when using modules (adjust if you vendor)
+/vendor/
+
+# IDE/editor settings
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+log/
+
+# Env & local config
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Docker
+docker/*.local.*
+.docker/
+.dockerignore.local
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Migrations compiled or generated files
+migrations/*.lock
+
+# Postman/Insomnia local artifacts
+*.postman_environment.json
+*.postman_globals.json
+
+# Coverage / tools
+cover.*
+coverage.*
+lcov.info
+
+# Air / reflex / hot-reload tools
+.air.toml
+tmp/
+.air/
+
+# OS junk
+ehthumbs.db
+Icon?
+._*
+
+# SQLite or local dev DBs (if any)
+*.db
+*.sqlite
+*.sqlite3

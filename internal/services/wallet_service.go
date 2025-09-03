@@ -124,43 +124,76 @@ func (s *walletService) DebitWallet(id uuid.UUID, req models.TransactionRequest)
     return s.processTransaction(id, req, models.Debit)
 }
 
-func (s *walletService) processTransaction(walletID uuid.UUID, req models.TransactionRequest, transactionType models.TransactionType) (*models.TransactionResponse, error) {
-    // Validate wallet exists
-    wallet, err := s.walletRepo.GetWalletByID(walletID)
-    if err != nil {
+// func (s *walletService) processTransaction(walletID uuid.UUID, req models.TransactionRequest, transactionType models.TransactionType) (*models.TransactionResponse, error) {
+//     // Validate wallet exists
+//     wallet, err := s.walletRepo.GetWalletByID(walletID)
+//     if err != nil {
+//         return nil, err
+//     }
+    
+//     // Update wallet balance
+//     err = s.walletRepo.UpdateWalletBalance(walletID, req.Amount, transactionType)
+//     if err != nil {
+//         return nil, err
+//     }
+    
+//     // Create transaction record
+//     transaction := &models.Transaction{
+//         WalletID:    wallet.ID,
+//         Type:        transactionType,
+//         Amount:      req.Amount,
+//         Description: req.Description,
+//         Reference:   req.Reference,
+//     }
+    
+//     err = s.walletRepo.CreateTransaction(transaction)
+//     if err != nil {
+//         return nil, err
+//     }
+    
+//     return &models.TransactionResponse{
+//         ID:          transaction.ID,
+//         WalletID:    transaction.WalletID,
+//         Type:        transaction.Type,
+//         Amount:      transaction.Amount,
+//         Description: transaction.Description,
+//         Reference:   transaction.Reference,
+//         CreatedAt:   transaction.CreatedAt,
+//     }, nil
+// }
+
+func (s *walletService) processTransaction(
+    walletID uuid.UUID,
+    req models.TransactionRequest,
+    t models.TransactionType,
+) (*models.TransactionResponse, error) {
+
+    // Optional: pre-check that wallet exists to return 404 early;
+    // not strictly required, as repo will return not found too.
+    if _, err := s.walletRepo.GetWalletByID(walletID); err != nil {
         return nil, err
     }
-    
-    // Update wallet balance
-    err = s.walletRepo.UpdateWalletBalance(walletID, req.Amount, transactionType)
-    if err != nil {
-        return nil, err
-    }
-    
-    // Create transaction record
-    transaction := &models.Transaction{
-        WalletID:    wallet.ID,
-        Type:        transactionType,
-        Amount:      req.Amount,
+
+    txModel := &models.Transaction{
         Description: req.Description,
         Reference:   req.Reference,
     }
-    
-    err = s.walletRepo.CreateTransaction(transaction)
-    if err != nil {
+
+    if err := s.walletRepo.ProcessTransactionWithRollback(walletID, req.Amount, t, txModel); err != nil {
         return nil, err
     }
-    
+
     return &models.TransactionResponse{
-        ID:          transaction.ID,
-        WalletID:    transaction.WalletID,
-        Type:        transaction.Type,
-        Amount:      transaction.Amount,
-        Description: transaction.Description,
-        Reference:   transaction.Reference,
-        CreatedAt:   transaction.CreatedAt,
+        ID:          txModel.ID,
+        WalletID:    txModel.WalletID,
+        Type:        txModel.Type,
+        Amount:      txModel.Amount,
+        Description: txModel.Description,
+        Reference:   txModel.Reference,
+        CreatedAt:   txModel.CreatedAt,
     }, nil
 }
+
 
 func (s *walletService) GetTransactionHistory(walletID uuid.UUID, page, limit int) ([]models.TransactionResponse, error) {
     if page <= 0 {

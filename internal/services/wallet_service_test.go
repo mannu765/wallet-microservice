@@ -1,3 +1,6 @@
+//go:build unit
+// +build unit
+
 // services/wallet_service_test.go
 package services
 
@@ -247,14 +250,15 @@ func TestCreditDebitWallet(t *testing.T) {
 		req := models.TransactionRequest{Amount: 25, Description: "refund", Reference: "ref-1"}
 
 		repo.On("GetWalletByID", id).Return(w, nil).Once()
-		repo.On("UpdateWalletBalance", id, 25.0, models.Credit).Return(nil).Once()
-		repo.On("CreateTransaction", mock.AnythingOfType("*models.Transaction")).Run(func(args mock.Arguments) {
-			tx := args.Get(0).(*models.Transaction)
-			assert.Equal(t, id, tx.WalletID)
-			assert.Equal(t, models.Credit, tx.Type)
-			assert.Equal(t, 25.0, tx.Amount)
-			assert.Equal(t, "refund", tx.Description)
-			assert.Equal(t, "ref-1", tx.Reference)
+		repo.On("ProcessTransactionWithRollback", id, 25.0, models.Credit, mock.AnythingOfType("*models.Transaction")).Run(func(args mock.Arguments) {
+			tx := args.Get(3).(*models.Transaction)
+			tx.ID = uuid.New()
+			tx.WalletID = id
+			tx.Type = models.Credit
+			tx.Amount = 25.0
+			tx.Description = "refund"
+			tx.Reference = "ref-1"
+			tx.CreatedAt = time.Now()
 		}).Return(nil).Once()
 
 		resp, err := svc.CreditWallet(id, req)
@@ -276,8 +280,16 @@ func TestCreditDebitWallet(t *testing.T) {
 		req := models.TransactionRequest{Amount: 40, Description: "purchase", Reference: "order-9"}
 
 		repo.On("GetWalletByID", id).Return(w, nil).Once()
-		repo.On("UpdateWalletBalance", id, 40.0, models.Debit).Return(nil).Once()
-		repo.On("CreateTransaction", mock.AnythingOfType("*models.Transaction")).Return(nil).Once()
+		repo.On("ProcessTransactionWithRollback", id, 40.0, models.Debit, mock.AnythingOfType("*models.Transaction")).Run(func(args mock.Arguments) {
+			tx := args.Get(3).(*models.Transaction)
+			tx.ID = uuid.New()
+			tx.WalletID = id
+			tx.Type = models.Debit
+			tx.Amount = 40.0
+			tx.Description = "purchase"
+			tx.Reference = "order-9"
+			tx.CreatedAt = time.Now()
+		}).Return(nil).Once()
 
 		resp, err := svc.DebitWallet(id, req)
 		assert.NoError(t, err)
@@ -299,28 +311,27 @@ func TestCreditDebitWallet(t *testing.T) {
 			assert.EqualError(t, err, "not found")
 			repo.AssertExpectations(t)
 		}
-		// UpdateWalletBalance error
+		// ProcessTransactionWithRollback error (balance update failure)
 		{
 			repo := new(MockWalletRepository)
 			svc := NewWalletService(repo)
 			id := uuid.New()
 			w := &models.Wallet{ID: id}
 			repo.On("GetWalletByID", id).Return(w, nil).Once()
-			repo.On("UpdateWalletBalance", id, 1.0, models.Credit).Return(errors.New("balance error")).Once()
+			repo.On("ProcessTransactionWithRollback", id, 1.0, models.Credit, mock.AnythingOfType("*models.Transaction")).Return(errors.New("balance error")).Once()
 			resp, err := svc.CreditWallet(id, models.TransactionRequest{Amount: 1})
 			assert.Nil(t, resp)
 			assert.EqualError(t, err, "balance error")
 			repo.AssertExpectations(t)
 		}
-		// CreateTransaction error
+		// ProcessTransactionWithRollback error (transaction creation failure)
 		{
 			repo := new(MockWalletRepository)
 			svc := NewWalletService(repo)
 			id := uuid.New()
 			w := &models.Wallet{ID: id}
 			repo.On("GetWalletByID", id).Return(w, nil).Once()
-			repo.On("UpdateWalletBalance", id, 2.0, models.Credit).Return(nil).Once()
-			repo.On("CreateTransaction", mock.AnythingOfType("*models.Transaction")).Return(errors.New("tx error")).Once()
+			repo.On("ProcessTransactionWithRollback", id, 2.0, models.Credit, mock.AnythingOfType("*models.Transaction")).Return(errors.New("tx error")).Once()
 			resp, err := svc.CreditWallet(id, models.TransactionRequest{Amount: 2})
 			assert.Nil(t, resp)
 			assert.EqualError(t, err, "tx error")

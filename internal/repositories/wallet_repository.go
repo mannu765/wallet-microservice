@@ -91,82 +91,116 @@ func (r *walletRepository) GetTransactionsByWalletID(walletID uuid.UUID, limit, 
 }
 
 func (r *walletRepository) UpdateWalletBalance(walletID uuid.UUID, amount float64, transactionType models.TransactionType) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		var wallet models.Wallet
-		// Use GORM v2 locking clause for SELECT ... FOR UPDATE
-		if err := tx.
-			Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&wallet, "id = ?", walletID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("wallet not found")
-			}
-			return err
-		}
+	// Start transaction explicitly
+	tx := r.db.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
 
-		if transactionType == models.Debit {
-			if wallet.Balance < amount {
-				return errors.New("insufficient balance")
-			}
-			wallet.Balance -= amount
-		} else {
-			wallet.Balance += amount
+	// Defer rollback in case of panic
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
 		}
+	}()
 
-		return tx.Save(&wallet).Error
-	})
+	var wallet models.Wallet
+	// Use GORM v2 locking clause for SELECT ... FOR UPDATE
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&wallet, "id = ?", walletID).Error; err != nil {
+		tx.Rollback()
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("wallet not found")
+		}
+		return err
+	}
+
+	if transactionType == models.Debit {
+		if wallet.Balance < amount {
+			tx.Rollback()
+			return errors.New("insufficient balance")
+		}
+		wallet.Balance -= amount
+	} else {
+		wallet.Balance += amount
+	}
+
+	if err := tx.Save(&wallet).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Commit the transaction
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (r *walletRepository) ProcessTransactionWithRollback(
-    walletID uuid.UUID,
-    amount float64,
-    t models.TransactionType,
-    txReq *models.Transaction,
+	walletID uuid.UUID,
+	amount float64,
+	t models.TransactionType,
+	txReq *models.Transaction,
 ) error {
-    // 1) Start a transaction: db.Transaction opens a BEGIN; it will COMMIT on nil or ROLLBACK on error.
-    return r.db.Transaction(func(tx *gorm.DB) error {
+	// Start transaction explicitly
+	tx := r.db.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
 
-        // 2) Lock the target wallet row using SELECT ... FOR UPDATE.
-        //    This ensures no other transaction can modify this wallet until this one commits/rolls back.
-        var wallet models.Wallet
-        if err := tx.
-            Clauses(clause.Locking{Strength: "UPDATE"}).
-            First(&wallet, "id = ?", walletID).Error; err != nil {
-            // Returning an error here causes the transaction helper to ROLLBACK.
-            return err
-        }
+	// Defer rollback in case of panic
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 
-        // 3) Business validation and balance math inside the same transaction.
-        if t == models.Debit {
-            if wallet.Balance < amount {
-                // Any error returned triggers a ROLLBACK and discards changes.
-                return errors.New("insufficient balance")
-            }
-            wallet.Balance -= amount
-        } else {
-            wallet.Balance += amount
-        }
+	// 1) Lock the target wallet row using SELECT ... FOR UPDATE
+	var wallet models.Wallet
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&wallet, "id = ?", walletID).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
 
-        // 4) Persist the new balance; if this fails (e.g., constraint/connection), return error to rollback.
-        if err := tx.Save(&wallet).Error; err != nil {
-            return err
-        }
+	// 2) Business validation and balance math
+	if t == models.Debit {
+		if wallet.Balance < amount {
+			tx.Rollback()
+			return errors.New("insufficient balance")
+		}
+		wallet.Balance -= amount
+	} else {
+		wallet.Balance += amount
+	}
 
-        // 5) Prepare and insert the transaction record in the same transaction.
-        //    If this insert fails, returning error will rollback the earlier balance update as well.
-        txReq.WalletID = wallet.ID
-        txReq.Type = t
-        txReq.Amount = amount
+	// 3) Persist the new balance
+	if err := tx.Save(&wallet).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
 
-        if err := tx.Create(txReq).Error; err != nil {
-            // ROLLBACK: the previous UPDATE will be undone automatically.
-            return err
-        }
+	// 4) Prepare and insert the transaction record
+	txReq.WalletID = wallet.ID
+	txReq.Type = t
+	txReq.Amount = amount
 
-        // 6) Return nil => transaction helper COMMITs both the balance update and the insert atomically.
-        return nil
-    })
+	if err := tx.Create(txReq).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// 5) Commit the transaction
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+
+	return nil
 }
-
 
 func (r *walletRepository) WithTransaction(fn func(tx *gorm.DB) error) error {
 	return r.db.Transaction(fn)
